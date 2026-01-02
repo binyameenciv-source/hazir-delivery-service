@@ -1,1 +1,353 @@
+import React, { useState, useEffect } from 'react';
+import './index.css'; // Tailwind design ke liye zaroori hai
+import { initializeApp } from 'firebase/app';
+import { 
+  getAuth, 
+  signInAnonymously, 
+  signInWithCustomToken, 
+  onAuthStateChanged 
+} from 'firebase/auth';
+import { 
+  getFirestore, 
+  collection, 
+  doc, 
+  setDoc, 
+  getDoc, 
+  addDoc, 
+  onSnapshot, 
+  updateDoc, 
+  deleteDoc
+} from '// --- Firebase Setup ---
+const firebaseConfig = {
+  apiKey: "AIzaSyBayh2YVgqBvQJVoi1ICyNEJBzwJxdyeqU",
+  authDomain: "hazir-service-b110e.firebaseapp.com",
+  projectId: "hazir-service-b110e",
+  storageBucket: "hazir-service-b110e.firebasestorage.app",
+  messagingSenderId: "1036434756682",
+  appId: "1:1036434756682:web:e4e46f5ddfb8b8450182b3"
+};';
+import { 
+  Truck, Plus, Trash2, Package, User, ArrowRight, ShieldCheck, 
+  LogOut, Bike, BarChart3, Wallet, Fuel, MapPin, Timer, Navigation2, Loader2, Lock, Tag 
+} from 'lucide-react';
 
+// --- Firebase Setup ---
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT.appspot.com",
+  messagingSenderId: "YOUR_ID",
+  appId: "YOUR_APP_ID"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = 'hazir-service-app-v3';
+
+// --- Shared Components ---
+const LogoHS = () => (
+  <svg width="44" height="44" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect width="100" height="100" rx="24" fill="#F97316"/>
+    <path d="M30 30V70M30 50H50M50 30V70" stroke="white" strokeWidth="8" strokeLinecap="round"/>
+    <path d="M55 70C65 70 75 65 75 55C75 45 65 40 55 40C45 40 45 30 55 30C65 30 75 35 75 35" stroke="white" strokeWidth="8" strokeLinecap="round"/>
+  </svg>
+);
+
+function RoleBtn({ icon, title, desc, color, onClick }) {
+  const colors = {
+    orange: 'bg-orange-100 text-orange-600 border-orange-200',
+    blue: 'bg-blue-100 text-blue-600 border-blue-200',
+    purple: 'bg-purple-100 text-purple-600 border-purple-200'
+  };
+  return (
+    <button onClick={onClick} className="w-full bg-white p-6 rounded-[32px] border shadow-sm flex items-center justify-between group active:scale-95 transition-all">
+      <div className="flex items-center gap-4 text-left">
+        <div className={`p-4 rounded-2xl ${colors[color]}`}>{icon}</div>
+        <div>
+          <p className="font-black text-gray-800 text-lg leading-tight">{title}</p>
+          <p className="text-[11px] text-gray-400 font-bold uppercase tracking-widest mt-1">{desc}</p>
+        </div>
+      </div>
+      <ArrowRight className="text-gray-300 group-hover:text-orange-500 transition-colors" />
+    </button>
+  );
+}
+
+// --- Main App ---
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [role, setRole] = useState(null); 
+  const [isUnlocked, setIsUnlocked] = useState(false);
+  const [passcode, setPasscode] = useState('');
+  const [products, setProducts] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [shops, setShops] = useState([]);
+  const [expenses, setExpenses] = useState([]);
+  const [cart, setCart] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const categories = ["Food", "Grocery", "Medicine", "Electronics", "Others"];
+  const availableRiders = ["Ali Rider", "Usman Delivery", "Raza Hazir"];
+
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        await signInAnonymously(auth);
+      } catch (err) { console.error("Auth error", err); }
+    };
+    initAuth();
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setLoading(false);
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const unsubS = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'shops'), (s) => setShops(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+    const unsubP = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'products'), (s) => setProducts(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+    const unsubO = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), (s) => setOrders(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+    const unsubE = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'expenses'), (s) => setExpenses(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+    return () => { unsubP(); unsubO(); unsubS(); unsubE(); };
+  }, [user]);
+
+  const isShopOpen = (shop) => {
+    if (!shop || !shop.openTime || !shop.closeTime) return true;
+    const now = new Date();
+    const currentTime = now.getHours() * 60 + now.getMinutes();
+    const [openH, openM] = shop.openTime.split(':').map(Number);
+    const [closeH, closeM] = shop.closeTime.split(':').map(Number);
+    return currentTime >= (openH * 60 + openM) && currentTime <= (closeH * 60 + closeM);
+  };
+
+  const addToCart = (product) => {
+    const shop = shops.find(s => s.id === product.shopId);
+    if (!isShopOpen(shop)) return; 
+    setCart(prev => {
+      const ex = prev.find(i => i.id === product.id);
+      if (ex) return prev.map(i => i.id === product.id ? { ...i, qty: i.qty + 1 } : i);
+      return [...prev, { ...product, qty: 1 }];
+    });
+  };
+
+  const placeOrder = async (address, distance) => {
+    if (cart.length === 0) return;
+    const orderData = {
+      customerId: user.uid,
+      items: cart,
+      subtotal: cart.reduce((s, i) => s + (i.price * i.qty), 0),
+      deliveryCharges: 0, 
+      status: 'pending',
+      timestamp: Date.now(),
+      riderId: null,
+      address: address || "No address provided",
+      distanceKm: Number(distance) || (Math.random() * 4 + 1).toFixed(1),
+    };
+    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'orders'), orderData);
+    setCart([]);
+    setRole('customer');
+  };
+
+  const checkPasscode = () => {
+    if (role === 'rider' && passcode === '1234') setIsUnlocked(true);
+    else if (role === 'admin' && passcode === '0000') setIsUnlocked(true);
+    else alert("Ghalat Passcode! Rider: 1234, Owner: 0000");
+  };
+
+  if (loading) return <div className="h-screen flex items-center justify-center bg-orange-50"><Loader2 className="animate-spin text-orange-500" size={32} /></div>;
+
+  if (!role) {
+    return (
+      <div className="min-h-screen bg-white flex flex-col items-center justify-center p-6 text-center">
+        <LogoHS />
+        <h1 className="text-4xl font-black text-orange-600 mt-5 tracking-tighter uppercase leading-none">Hazir Service</h1>
+        <p className="text-gray-400 mb-12 font-bold uppercase tracking-[3px] text-[10px] mt-2">Apka Apna Delivery System</p>
+        <div className="w-full max-w-sm space-y-4">
+          <RoleBtn icon={<User size={28}/>} title="Customer App" desc="Khaana aur Sauda Mangwayein" color="orange" onClick={() => { setRole('customer'); setIsUnlocked(true); }} />
+          <RoleBtn icon={<Bike size={28}/>} title="Delivery Boy" desc="Order Pick aur Deliver Karain" color="blue" onClick={() => { setRole('rider'); setIsUnlocked(false); setPasscode(''); }} />
+          <RoleBtn icon={<ShieldCheck size={28}/>} title="Owner Panel" desc="Finance, Inventory & Orders" color="purple" onClick={() => { setRole('admin'); setIsUnlocked(false); setPasscode(''); }} />
+        </div>
+      </div>
+    );
+  }
+
+  if (!isUnlocked) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6">
+        <div className="bg-white p-10 rounded-[48px] shadow-2xl w-full max-w-sm text-center border border-gray-100">
+           <div className={`mx-auto p-5 rounded-3xl w-fit mb-6 ${role === 'rider' ? 'bg-blue-50 text-blue-600' : 'bg-purple-50 text-purple-600'}`}>
+              {role === 'rider' ? <Bike size={40}/> : <Lock size={40}/>}
+           </div>
+           <h2 className="text-3xl font-black text-gray-800 capitalize mb-1">{role === 'admin' ? 'Owner' : role}</h2>
+           <p className="text-[10px] text-gray-400 mb-8 font-black uppercase tracking-widest">Security Pin Code Lagayein</p>
+           <input type="password" placeholder="••••" value={passcode} onChange={(e) => setPasscode(e.target.value)} className="w-full bg-gray-50 border-2 border-gray-100 p-5 rounded-[24px] text-center text-4xl font-black tracking-[15px] outline-none focus:border-orange-500 transition-all" />
+           <button onClick={checkPasscode} className="w-full bg-gray-900 text-white py-5 rounded-[24px] font-black mt-6 shadow-xl active:scale-95 transition-all text-lg uppercase tracking-wider">Verify Login</button>
+           <button onClick={() => setRole(null)} className="mt-6 text-xs font-bold text-gray-400 uppercase tracking-widest">Wapis Chalain</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 flex flex-col max-w-md mx-auto shadow-2xl relative border-x border-gray-100">
+      <header className="bg-white border-b px-5 py-5 flex items-center justify-between sticky top-0 z-50">
+        <div className="flex items-center gap-3">
+          <LogoHS />
+          <div>
+            <span className="font-black text-xl text-orange-600 tracking-tighter uppercase leading-none block">Hazir Service</span>
+            <p className="text-[9px] font-black text-gray-400 uppercase tracking-[2px] mt-0.5">{role === 'admin' ? 'Owner' : role === 'rider' ? 'Rider' : 'Customer'}</p>
+          </div>
+        </div>
+        <button onClick={() => {setRole(null); setIsUnlocked(false);}} className="p-2.5 bg-gray-50 rounded-xl text-gray-400 hover:text-red-500 transition-all"><LogOut size={20}/></button>
+      </header>
+      <main className="flex-1 overflow-y-auto pb-24 no-scrollbar">
+        {role === 'customer' && <CustomerView products={products} shops={shops} cart={cart} addToCart={addToCart} placeOrder={placeOrder} orders={orders} userId={user.uid} categories={categories} isShopOpen={isShopOpen} />}
+        {role === 'rider' && <RiderView orders={orders} db={db} appId={appId} />}
+        {role === 'admin' && <AdminView products={products} shops={shops} orders={orders} expenses={expenses} db={db} appId={appId} categories={categories} riders={availableRiders} />}
+      </main>
+    </div>
+  );
+}
+
+// --- Customer View ---
+function CustomerView({ products, shops, cart, addToCart, placeOrder, orders, userId, categories, isShopOpen }) {
+  const [activeCat, setActiveCat] = useState('All');
+  const [tab, setTab] = useState('browse');
+  const [address, setAddress] = useState('');
+  const [isDetecting, setIsDetecting] = useState(false);
+  const [detectedDist, setDetectedDist] = useState(null);
+
+  const handleAutoLocation = () => {
+    setIsDetecting(true);
+    setTimeout(() => {
+      const locs = ["Model Town Q Block", "DHA Sector AA", "Gulshan Block 7"];
+      setAddress(locs[Math.floor(Math.random()*locs.length)]);
+      setDetectedDist((Math.random() * 5 + 0.5).toFixed(1));
+      setIsDetecting(false);
+    }, 1500);
+  };
+
+  const myOrders = orders.filter(o => o.customerId === userId).sort((a,b) => b.timestamp - a.timestamp);
+
+  return (
+    <div className="p-4 space-y-6">
+      <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
+        {['All', ...categories].map(cat => (
+          <button key={cat} onClick={() => setActiveCat(cat)} className={`px-6 py-2.5 rounded-full text-[10px] font-black uppercase whitespace-nowrap transition-all ${activeCat === cat ? 'bg-orange-600 text-white shadow-lg' : 'bg-white text-gray-500 border'}`}>{cat}</button>
+        ))}
+      </div>
+      <div className="flex bg-white p-1 rounded-2xl border shadow-sm">
+        {['browse', 'cart', 'orders'].map(t => (
+          <button key={t} onClick={() => setTab(t)} className={`flex-1 py-3 text-[11px] font-black capitalize rounded-xl transition-all ${tab === t ? 'bg-orange-500 text-white shadow-md' : 'text-gray-400'}`}>{t}</button>
+        ))}
+      </div>
+      {tab === 'browse' && (
+        <div className="grid grid-cols-2 gap-4">
+          {products.filter(p => activeCat === 'All' || p.category === activeCat).map(p => {
+            const open = isShopOpen(shops.find(s => s.id === p.shopId));
+            return (
+              <div key={p.id} className={`bg-white rounded-[32px] border p-3 shadow-sm flex flex-col h-full hover:border-orange-200 transition-all ${!open && 'opacity-60'}`}>
+                <div className="h-28 bg-gray-50 rounded-[24px] mb-3 flex items-center justify-center relative">
+                  <Package className="text-gray-200 w-12 h-12" />
+                  {open ? <span className="absolute top-2 right-2 text-[7px] bg-green-500 text-white px-2 py-0.5 rounded-full animate-blink uppercase">Open</span> : <span className="absolute top-2 right-2 text-[7px] bg-red-500 text-white px-2 py-0.5 rounded-full uppercase">Closed</span>}
+                </div>
+                <h3 className="font-bold text-gray-800 text-sm truncate px-1">{p.name}</h3>
+                <p className="text-orange-600 font-black text-sm px-1 mt-1">Rs. {p.price}</p>
+                <button onClick={() => addToCart(p)} disabled={!open} className="w-full mt-3 bg-orange-500 text-white py-2.5 rounded-2xl text-[10px] font-black shadow-lg">Add Items</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {tab === 'cart' && (
+        <div className="space-y-4">
+          {cart.map(item => (
+            <div key={item.id} className="bg-white p-4 rounded-3xl border flex justify-between items-center shadow-sm">
+              <div><p className="font-black text-gray-800">{item.name}</p><p className="text-[10px] text-gray-400 font-bold">{item.qty} x Rs. {item.price}</p></div>
+              <p className="font-black text-orange-600">Rs. {item.price * item.qty}</p>
+            </div>
+          ))}
+          {cart.length > 0 ? (
+            <div className="bg-white p-8 rounded-[40px] border border-orange-100 shadow-xl space-y-5">
+              <textarea value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Delivery Address Likhein..." className="w-full bg-gray-50 border p-4 rounded-3xl text-sm font-bold h-24 resize-none outline-none" />
+              <div className="flex justify-between items-center pt-4 border-t"><span className="font-bold text-gray-400 text-[10px] uppercase">Bill Total</span><span className="font-black text-3xl">Rs. {cart.reduce((s,i) => s + (i.price * i.qty), 0)}</span></div>
+              <button onClick={() => placeOrder(address, detectedDist)} className="w-full bg-orange-600 text-white py-5 rounded-3xl font-black text-lg uppercase tracking-wider">Book Order</button>
+            </div>
+          ) : <div className="py-20 text-center text-gray-300 font-bold italic">Cart khali hai...</div>}
+        </div>
+      )}
+      {tab === 'orders' && (
+        <div className="space-y-4">
+          {myOrders.map(o => (
+            <div key={o.id} className="bg-white p-6 rounded-[32px] border shadow-sm">
+              <div className="flex justify-between items-center mb-5"><span className={`text-[9px] font-black px-3 py-1 rounded-full uppercase ${o.status === 'pending' ? 'bg-yellow-50 text-yellow-600' : 'bg-green-600 text-white'}`}>{o.status}</span></div>
+              <div className="bg-gray-50 p-3 rounded-2xl text-[10px] font-bold text-gray-500 uppercase">{o.address}</div>
+              <div className="flex justify-between pt-4 font-black text-xl text-gray-800 border-t mt-4"><span>To Pay</span><span className="text-orange-600">Rs. {o.subtotal + (o.deliveryCharges || 0)}</span></div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- Rider View ---
+function RiderView({ orders, db, appId }) {
+  const activeOrders = orders.filter(o => o.status === 'assigned' || o.status === 'picked');
+  const updateStatus = async (id, status) => {
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', id), { status });
+  };
+  return (
+    <div className="p-4 space-y-6">
+      <h2 className="text-2xl font-black text-blue-600 flex items-center gap-2 px-1"><Truck size={28}/> Tasks</h2>
+      {activeOrders.map(o => (
+        <div key={o.id} className="bg-white p-6 rounded-[32px] border-2 border-blue-50 shadow-md">
+           <div className="flex justify-between mb-4"><div><p className="text-[10px] text-gray-400 font-black uppercase">Collect Cash</p><p className="font-black text-2xl">Rs. {o.subtotal + (o.deliveryCharges || 0)}</p></div></div>
+           <p className="text-xs font-black text-slate-700 uppercase mb-4">{o.address}</p>
+           <button onClick={() => updateStatus(o.id, o.status === 'assigned' ? 'picked' : 'delivered')} className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black uppercase text-xs">
+             {o.status === 'assigned' ? 'Pick Order' : 'Mark Delivered'}
+           </button>
+        </div>
+      ))}
+      {activeOrders.length === 0 && <div className="py-32 text-center text-gray-300 font-bold italic">No tasks today.</div>}
+    </div>
+  );
+}
+
+// --- Admin View ---
+function AdminView({ products, shops, orders, expenses, db, appId, categories, riders }) {
+  const [tab, setTab] = useState('finance');
+  const [deliveryInput, setDeliveryInput] = useState({});
+
+  const assignRider = async (orderId, riderName) => {
+    const charges = deliveryInput[orderId];
+    if (!charges) return alert("Delivery charges likhain!");
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'orders', orderId), { status: 'assigned', riderId: riderName, deliveryCharges: Number(charges) });
+  };
+
+  return (
+    <div className="p-4 space-y-6">
+      <div className="flex bg-white p-1 rounded-2xl border shadow-sm">
+        {['finance', 'orders', 'menu'].map(t => (
+          <button key={t} onClick={() => setTab(t)} className={`flex-1 py-3 text-[10px] font-black capitalize rounded-xl ${tab === t ? 'bg-purple-600 text-white shadow-lg' : 'text-gray-400'}`}>{t}</button>
+        ))}
+      </div>
+      {tab === 'orders' && (
+        <div className="space-y-4">
+          {orders.filter(o => o.status === 'pending').map(o => (
+            <div key={o.id} className="bg-white p-6 rounded-[36px] border-2 border-purple-50 shadow-md space-y-5">
+              <p className="font-black text-gray-800 text-xl">Bill: Rs. {o.subtotal}</p>
+              <input type="number" value={deliveryInput[o.id] || ''} onChange={e => setDeliveryInput({...deliveryInput, [o.id]: e.target.value})} className="w-full bg-gray-50 border p-4 rounded-2xl text-sm font-black" placeholder="Delivery Charges (Rs.)" />
+              <div className="flex flex-wrap gap-2">{riders.map(r => (<button key={r} onClick={() => assignRider(o.id, r)} className="flex-1 bg-purple-600 text-white p-3 rounded-2xl text-[9px] font-black uppercase">Send to {r}</button>))}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {tab === 'finance' && <div className="text-center py-20 font-black text-gray-400 uppercase">Financial Reports Dashboard</div>}
+      {tab === 'menu' && <div className="text-center py-20 font-black text-gray-400 uppercase">Inventory Management</div>}
+    </div>
+  );
+}
